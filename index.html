@@ -101,6 +101,24 @@
       margin-bottom: 10px;
     }
 
+    .pressure-button {
+      padding: 20px 40px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      background-color: #ffc107;
+      color: #000000;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select: none;
+      margin-bottom: 15px;
+      touch-action: manipulation;
+    }
+
+    .pressure-button:active {
+      background-color: #e0a800;
+    }
+
     .instruction {
       font-size: 0.95rem;
       color: #888;
@@ -134,7 +152,8 @@
 
   <!-- PRESSURE SENSOR TAB -->
   <div id="pressureTab" class="tab-content">
-    <div class="instruction">Press and hold the <strong>SPACE BAR</strong> to simulate pressure. Holding for longer than 2 seconds triggers a crash.</div>
+    <div class="instruction">Press and **hold** the button below to simulate pressure. Holding for longer than 2 seconds triggers a crash.</div>
+    <button id="pressureBtn" class="pressure-button">Hold Pressure Button</button>
     <div id="pressureReadout" class="readout">Released (0.0s)</div>
     <div id="pressureStatus" class="status clear">OK</div>
   </div>
@@ -257,41 +276,48 @@
       }
     }
 
-    // --- 3. PRESSURE SENSOR LOGIC ---
+    // --- 3. PRESSURE SENSOR LOGIC (BUTTON HOLD) ---
+    const pressureBtn = document.getElementById('pressureBtn');
     const pressureStatus = document.getElementById('pressureStatus');
     const pressureReadout = document.getElementById('pressureReadout');
     let spacePressTimer = null;
     let startTime = 0;
-    let isSpaceDown = false;
+    let isPressed = false;
 
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && !isSpaceDown) {
-        e.preventDefault();
-        isSpaceDown = true;
-        startTime = Date.now();
+    function startPress(e) {
+      e.preventDefault();
+      if (isPressed) return;
+      isPressed = true;
+      startTime = Date.now();
 
-        spacePressTimer = setInterval(() => {
-          const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
-          pressureReadout.innerText = `Holding... (${elapsedSec}s)`;
+      spacePressTimer = setInterval(() => {
+        const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+        pressureReadout.innerText = `Holding... (${elapsedSec}s)`;
 
-          if (Date.now() - startTime >= 2000) {
-            pressureStatus.innerText = "CRASH";
-            pressureStatus.className = "status crash";
-          }
-        }, 100);
-      }
-    });
+        if (Date.now() - startTime >= 2000) {
+          pressureStatus.innerText = "CRASH";
+          pressureStatus.className = "status crash";
+        }
+      }, 100);
+    }
 
-    window.addEventListener('keyup', (e) => {
-      if (e.code === 'Space') {
-        e.preventDefault();
-        isSpaceDown = false;
-        clearInterval(spacePressTimer);
-        pressureReadout.innerText = "Released (0.0s)";
-        pressureStatus.innerText = "OK";
-        pressureStatus.className = "status clear";
-      }
-    });
+    function endPress(e) {
+      if (!isPressed) return;
+      e.preventDefault();
+      isPressed = false;
+      clearInterval(spacePressTimer);
+      pressureReadout.innerText = "Released (0.0s)";
+      pressureStatus.innerText = "OK";
+      pressureStatus.className = "status clear";
+    }
+
+    // Mouse and Touch Event Listeners for the button
+    pressureBtn.addEventListener('mousedown', startPress);
+    pressureBtn.addEventListener('mouseup', endPress);
+    pressureBtn.addEventListener('mouseleave', endPress);
+
+    pressureBtn.addEventListener('touchstart', startPress);
+    pressureBtn.addEventListener('touchend', endPress);
 
     // --- 4. ACCELEROMETER LOGIC ---
     const accelStatus = document.getElementById('accelStatus');
@@ -327,11 +353,9 @@
       const y = accel.y || 0;
       const z = accel.z || 0;
 
-      // Calculate total acceleration magnitude vector: sqrt(x² + y² + z²)
       const magnitude = Math.sqrt(x * x + y * y + z * z);
       accelReadout.innerText = `Acceleration: ${magnitude.toFixed(2)} m/s²`;
 
-      // Sudden rapid movement exceeds threshold; slow movements remain under threshold
       if (magnitude > JERK_ACCEL_THRESHOLD) {
         accelStatus.innerText = "CRASH";
         accelStatus.className = "status crash";
