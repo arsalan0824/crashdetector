@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crash Detector Suite</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background-color: #121212;
+      color: #ffffff;
+    }
+
+    nav {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .tab-btn {
+      padding: 10px 20px;
+      font-size: 1rem;
+      background-color: #2a2a2a;
+      color: #888888;
+      border: 2px solid #444;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .tab-btn.active {
+      background-color: #007bff;
+      color: #ffffff;
+      border-color: #007bff;
+    }
+
+    .tab-content {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    video, canvas {
+      border-radius: 8px;
+      max-width: 90vw;
+      max-height: 50vh;
+    }
+
+    canvas {
+      display: none;
+    }
+
+    .readout {
+      font-size: 1.3rem;
+      margin: 15px 0;
+      color: #aaaaaa;
+    }
+
+    .status {
+      margin-top: 15px;
+      font-size: 3rem;
+      font-weight: bold;
+      padding: 10px 25px;
+      border-radius: 8px;
+      min-height: 60px;
+      text-align: center;
+    }
+
+    .crash {
+      color: #ff3333;
+      background-color: rgba(255, 0, 0, 0.2);
+      border: 2px solid #ff3333;
+    }
+
+    .clear {
+      color: #33ff33;
+      background-color: rgba(0, 255, 0, 0.1);
+      border: 2px solid #33ff33;
+    }
+
+    button.action-btn {
+      padding: 12px 24px;
+      font-size: 1.1rem;
+      background-color: #28a745;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+
+    .instruction {
+      font-size: 0.95rem;
+      color: #888;
+      max-width: 400px;
+      margin-bottom: 15px;
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <button class="tab-btn active" onclick="switchTab('camera')">Camera</button>
+    <button class="tab-btn" onclick="switchTab('sound')">Sound</button>
+    <button class="tab-btn" onclick="switchTab('pressure')">Pressure Sensor</button>
+    <button class="tab-btn" onclick="switchTab('accelerometer')">Accelerometer</button>
+  </nav>
+
+  <!-- CAMERA TAB -->
+  <div id="cameraTab" class="tab-content active">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+    <div id="camStatus" class="status clear">OK</div>
+  </div>
+
+  <!-- SOUND TAB -->
+  <div id="soundTab" class="tab-content">
+    <button id="startAudioBtn" class="action-btn" onclick="initAudio()">Start Microphone</button>
+    <div id="dbReadout" class="readout">-- dB SPL</div>
+    <div id="soundStatus" class="status clear">OK</div>
+  </div>
+
+  <!-- PRESSURE SENSOR TAB -->
+  <div id="pressureTab" class="tab-content">
+    <div class="instruction">Press and hold the <strong>SPACE BAR</strong> to simulate pressure. Holding for longer than 2 seconds triggers a crash.</div>
+    <div id="pressureReadout" class="readout">Released (0.0s)</div>
+    <div id="pressureStatus" class="status clear">OK</div>
+  </div>
+
+  <!-- ACCELEROMETER TAB -->
+  <div id="accelerometerTab" class="tab-content">
+    <button id="startMotionBtn" class="action-btn" onclick="initMotion()">Enable Motion Sensors</button>
+    <div class="instruction">Attach device to helmet. Sudden rapid movements trigger a crash; slow moves remain clear.</div>
+    <div id="accelReadout" class="readout">Acceleration: 0.00 m/s²</div>
+    <div id="accelStatus" class="status clear">OK</div>
+  </div>
+
+  <script>
+    // Tab Navigation
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+      const selectedIndex = ['camera', 'sound', 'pressure', 'accelerometer'].indexOf(tabId);
+      document.querySelectorAll('.tab-btn')[selectedIndex].classList.add('active');
+      document.getElementById(`${tabId}Tab`).classList.add('active');
+    }
+
+    // --- 1. CAMERA LOGIC ---
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const camStatus = document.getElementById('camStatus');
+
+    const DARKNESS_LUMINANCE_THRESHOLD = 80;
+    const PERCENTAGE_THRESHOLD = 0.70;
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        video.srcObject = stream;
+        video.addEventListener('loadedmetadata', () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          requestAnimationFrame(processFrame);
+        });
+      } catch (err) {
+        camStatus.innerText = "Camera Access Denied";
+      }
+    }
+
+    function processFrame() {
+      if (!video.paused && !video.ended) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const totalPixels = canvas.width * canvas.height;
+        let darkPixelCount = 0;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const luminance = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+          if (luminance < DARKNESS_LUMINANCE_THRESHOLD) darkPixelCount++;
+        }
+
+        if ((darkPixelCount / totalPixels) >= PERCENTAGE_THRESHOLD) {
+          camStatus.innerText = "CRASH";
+          camStatus.className = "status crash";
+        } else {
+          camStatus.innerText = "OK";
+          camStatus.className = "status clear";
+        }
+      }
+      requestAnimationFrame(processFrame);
+    }
+
+    // --- 2. SOUND LOGIC ---
+    const soundStatus = document.getElementById('soundStatus');
+    const dbReadout = document.getElementById('dbReadout');
+    const DB_THRESHOLD = 80;
+    let audioInitialized = false;
+
+    async function initAudio() {
+      if (audioInitialized) return;
+      document.getElementById('startAudioBtn').style.display = 'none';
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const analyzer = audioCtx.createAnalyser();
+        const source = audioCtx.createMediaStreamSource(stream);
+
+        analyzer.fftSize = 2048;
+        source.connect(analyzer);
+
+        const dataArray = new Float32Array(analyzer.fftSize);
+        audioInitialized = true;
+
+        function processAudio() {
+          analyzer.getFloatTimeDomainData(dataArray);
+
+          let sumSquares = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sumSquares += dataArray[i] * dataArray[i];
+          }
+          const rms = Math.sqrt(sumSquares / dataArray.length);
+          const db = rms > 0 ? 20 * Math.log10(rms) + 100 : 0;
+          const displayDb = Math.max(0, Math.round(db));
+
+          dbReadout.innerText = `${displayDb} dB SPL`;
+
+          if (displayDb > DB_THRESHOLD) {
+            soundStatus.innerText = "CRASH";
+            soundStatus.className = "status crash";
+          } else {
+            soundStatus.innerText = "OK";
+            soundStatus.className = "status clear";
+          }
+
+          requestAnimationFrame(processAudio);
+        }
+
+        processAudio();
+      } catch (err) {
+        soundStatus.innerText = "Mic Access Denied";
+      }
+    }
+
+    // --- 3. PRESSURE SENSOR LOGIC ---
+    const pressureStatus = document.getElementById('pressureStatus');
+    const pressureReadout = document.getElementById('pressureReadout');
+    let spacePressTimer = null;
+    let startTime = 0;
+    let isSpaceDown = false;
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && !isSpaceDown) {
+        e.preventDefault();
+        isSpaceDown = true;
+        startTime = Date.now();
+
+        spacePressTimer = setInterval(() => {
+          const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+          pressureReadout.innerText = `Holding... (${elapsedSec}s)`;
+
+          if (Date.now() - startTime >= 2000) {
+            pressureStatus.innerText = "CRASH";
+            pressureStatus.className = "status crash";
+          }
+        }, 100);
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        isSpaceDown = false;
+        clearInterval(spacePressTimer);
+        pressureReadout.innerText = "Released (0.0s)";
+        pressureStatus.innerText = "OK";
+        pressureStatus.className = "status clear";
+      }
+    });
+
+    // --- 4. ACCELEROMETER LOGIC ---
+    const accelStatus = document.getElementById('accelStatus');
+    const accelReadout = document.getElementById('accelReadout');
+    const JERK_ACCEL_THRESHOLD = 25.0; // Acceleration magnitude threshold (m/s²) for sudden helmet motion
+
+    async function initMotion() {
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        try {
+          const permissionState = await DeviceMotionEvent.requestPermission();
+          if (permissionState === 'granted') {
+            window.addEventListener('devicemotion', handleMotion);
+            document.getElementById('startMotionBtn').style.display = 'none';
+          } else {
+            accelStatus.innerText = "Permission Denied";
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      } else if ('DeviceMotionEvent' in window) {
+        window.addEventListener('devicemotion', handleMotion);
+        document.getElementById('startMotionBtn').style.display = 'none';
+      } else {
+        accelReadout.innerText = "Device Motion API not supported on this device/browser.";
+      }
+    }
+
+    function handleMotion(event) {
+      const accel = event.accelerationIncludingGravity || event.acceleration;
+      if (!accel) return;
+
+      const x = accel.x || 0;
+      const y = accel.y || 0;
+      const z = accel.z || 0;
+
+      // Calculate total acceleration magnitude vector: sqrt(x² + y² + z²)
+      const magnitude = Math.sqrt(x * x + y * y + z * z);
+      accelReadout.innerText = `Acceleration: ${magnitude.toFixed(2)} m/s²`;
+
+      // Sudden rapid movement exceeds threshold; slow movements remain under threshold
+      if (magnitude > JERK_ACCEL_THRESHOLD) {
+        accelStatus.innerText = "CRASH";
+        accelStatus.className = "status crash";
+      } else {
+        accelStatus.innerText = "OK";
+        accelStatus.className = "status clear";
+      }
+    }
+
+    startCamera();
+  </script>
+</body>
+</html>
